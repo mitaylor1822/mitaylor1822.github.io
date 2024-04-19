@@ -1,2 +1,2 @@
-<a href="network.html" title="Network">Network</a>
+<a href="mitaylor1822.github.io/network.html" title="Network">Network</a>
 Network diagram of PML biomarkers
