@@ -1,0 +1,160 @@
+---
+title: "Data_Science_is_so_ANNOYing"
+output: html_document
+date: "2026-05-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+#Define where you will be getting your images from
+setwd("~/Desktop/Data")
+
+#Install and load necessary libraries
+library(plotly)
+library(magick)
+library(ggplot2)
+library(dplyr)
+library(Rcpp)
+library(RcppAnnoy)
+library(CspStandSegmentation)
+
+#Define the resolution (N x N x N grid where N determines your resolution)
+n <- 250
+coords <- seq(-1, 1, length.out = n)
+grid <- expand.grid(x = coords, y = coords, z = coords)
+
+
+#Load the three images
+img_1 <- image_read("Image_1.jpg")
+img_2 <- image_read("Image_2.jpg")
+img_3 <- image_read("Image_3.jpg")
+
+#If the image is mostly light, set to TRUE so that the inverse image can be used
+inverse_1 <- FALSE
+inverse_2 <- TRUE
+inverse_3 <- FALSE
+
+#Convert images to grayscale and scale down for speed, inverse if necessary
+if(inverse_1 == TRUE){
+  img_proc_1 <- img_1 %>%
+    image_quantize(max=2, colorspace = 'gray') %>%
+    image_negate() %>%
+    image_scale("250x250") # Adjust size as needed
+}
+if(inverse_1 == FALSE){
+  img_proc_1 <- img_1 %>%
+    image_quantize(max=2, colorspace = 'gray') %>%
+    image_scale("250x250") # Adjust size as needed
+}
+
+if(inverse_2 == TRUE){
+  img_proc_2 <- img_2 %>%
+    image_quantize(max=2, colorspace = 'gray') %>%
+    image_negate() %>%
+    image_scale("250x250") # Adjust size as needed
+}
+if(inverse_2 == FALSE){
+  img_proc_2 <- img_2 %>%
+    image_quantize(max=2, colorspace = 'gray') %>%
+    image_scale("250x250") # Adjust size as needed
+}
+
+if(inverse_3 == TRUE){
+  img_proc_3 <- img_3 %>%
+    image_quantize(max=2, colorspace = 'gray') %>%
+    image_negate() %>%
+    image_scale("250x250") # Adjust size as needed
+}
+if(inverse_3 == FALSE){
+  img_proc_3 <- img_3 %>%
+    image_quantize(max=2, colorspace = 'gray') %>%
+    image_scale("250x250") # Adjust size as needed
+}
+
+#Convert images to numeric 2D matricies
+img_1_data <- as.integer(image_data(img_proc_1, channels = "gray"))[,,1]
+img_2_data <- as.integer(image_data(img_proc_2, channels = "gray"))[,,1]
+img_3_data <- as.integer(image_data(img_proc_3, channels = "gray"))[,,1]
+
+#Turn matrix into a 3D data frame of coordinates by stretching in Z direction then listing coordinate points
+df_1 <- as.data.frame(which(img_1_data < 128, arr.ind = TRUE))
+colnames(df_1) <- c("y", "x")
+df_1_3d <- matrix(0, nrow = 0, ncol = 3)
+for (i in 1:n){
+  df_1_new <- cbind(df_1, rep(i, length(df_1$y)))
+  df_1_3d <- rbind(df_1_3d, df_1_new)
+}
+colnames(df_1_3d) <- c("y", "x", "z")
+
+df_2 <- as.data.frame(which(img_2_data < 128, arr.ind = TRUE))
+colnames(df_2) <- c("y", "x")
+df_2_3d <- matrix(0, nrow = 0, ncol = 3)
+for (i in 1:n){
+  df_2_new <- cbind(df_2, rep(i, length(df_2$y)))
+  df_2_3d <- rbind(df_2_3d, df_2_new)
+}
+colnames(df_2_3d) <- c("z", "y", "x")
+
+df_3 <- as.data.frame(which(img_3_data < 128, arr.ind = TRUE))
+colnames(df_3) <- c("y", "x")
+df_3_3d <- matrix(0, nrow = 0, ncol = 3)
+for (i in 1:n){
+  df_3_new <- cbind(df_3, rep(i, length(df_3$y)))
+  df_3_3d <- rbind(df_3_3d, df_3_new)
+}
+colnames(df_3_3d) <- c("z", "x", "y")
+
+#Find points that intersect all three stretched images
+merged <- inner_join(df_1_3d, df_2_3d, by = c("x", "y", "z"))
+merged_new <- inner_join(merged, df_3_3d, by = c("x", "y", "z"))
+
+#Find nearest neighbors for cluster coloring using the Approximate Nearest Neighbors (Oh Yeah!) algorithm
+#Fun fact, this algorithm was developed by Spotify to serve you recommended songs based on past listening history quickly and with minimal computational power
+points <- fds(as.matrix(merged_new), 10, ret = "idx", scale = FALSE)
+annoy <- new(AnnoyEuclidean, 3)
+annoy$setSeed(42)
+for (i in 1:length(merged_new$y)) annoy$addItem(i - 1, as.numeric(merged_new[i,]))
+annoy$build(50)
+all_centroids <- list()
+all_point_neighbors <- list()
+for (i in 1:length(points)){
+  all_centroids <- c(all_centroids, list(merged_new[points[i],]))
+  point_neighbors <- annoy$getNNsByVector(as.numeric(merged_new[points[i],]), length(merged_new$y)/10)
+  names(point_neighbors) <- rep(i, length(merged_new$y)/10)
+  all_point_neighbors <- c(all_point_neighbors, point_neighbors)
+}
+all_point_neighbors <- as.data.frame(cbind(as.numeric(all_point_neighbors), names(all_point_neighbors)))
+colnames(all_point_neighbors) <- c("index", "group")
+all_point_neighbors$index <- as.numeric(all_point_neighbors$index)
+all_point_neighbors$group <- as.numeric(all_point_neighbors$group)
+all_point_neighbors_unique <- all_point_neighbors %>% distinct(index, .keep_all = TRUE)
+missing_values <- setdiff(seq(from = 0, to = length(merged_new$y)-1, by = 1), all_point_neighbors_unique$index)
+add <- cbind(missing_values, rep(0, length(missing_values)))
+colnames(add) <- c("index", "group")
+all_point_neighbors_final <- rbind(all_point_neighbors_unique, add)
+all_point_neighbors_final <- all_point_neighbors_final[order(all_point_neighbors_final$index), ]
+merged_new$group <- all_point_neighbors_final$group
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=TRUE}
+#You can choose whatever cluster colors you want. I chose the colors for the progressive pride flag
+plot_ly(merged_new, x = ~x, y = ~y, z = ~z, color = ~group, colors = c("#E40303", "#FF8C00", "#FFED00", "#008026","#004DFF", "#750787", "#FFAFC8", "#74D7EE", "#613915", "#000000" ), size = 2) %>% 
+  layout(
+    scene = list(camera = list(projection = list(type = 'orthographic'))
+  ))
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
